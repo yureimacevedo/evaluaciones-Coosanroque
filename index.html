@@ -1885,10 +1885,20 @@ const VistaParametrizacion = ({periodo, onSave}) => {
   // lo guardado en Firestore — así un periodo creado ANTES de agregar una
   // categoría nueva (p. ej. "Órganos de Administración y Control") no revienta
   // esta pantalla al no encontrar esa clave.
+  const validRoleKeys = ROLES.map(r=>r.key);
   const fillEvaluatorWeights = (saved) => {
     const base = defaultEvaluatorWeights();
     const merged = {...base, ...(saved||{})};
     CATEGORIES.forEach(c=>{ if(!merged[c.key]) merged[c.key] = base[c.key] || {}; });
+    // Limpieza: si el periodo viene de antes de que se quitara algún rol del
+    // sistema (ej. "Subordinado"), esa clave vieja queda guardada pero ya no
+    // tiene casilla ni fila visible — sigue sumando al total sin que se vea de
+    // dónde sale. La quitamos aquí para que lo que se ve y lo que suma coincidan.
+    Object.keys(merged).forEach(catKey=>{
+      Object.keys(merged[catKey]).forEach(roleKey=>{
+        if(!validRoleKeys.includes(roleKey)) delete merged[catKey][roleKey];
+      });
+    });
     return merged;
   };
   const fillComponentWeights = (saved) => {
