@@ -2671,6 +2671,17 @@ const VistaAsignaciones = ({periodo, collaborators, assignments, evaluations, on
     setSelectFor(prev=>({...prev, [key]:''}));
   };
 
+  const incompletos = collaborators.map(p=>{
+    const roleWeights = periodo.evaluatorWeights[p.categoria] || {};
+    const rolesFaltantes = Object.keys(roleWeights).filter(roleKey=>{
+      if(roleKey==='autoevaluacion') return false; // se asigna sola, no requiere a nadie
+      if(!roleWeights[roleKey]) return false; // peso 0, ese rol no aplica de verdad
+      return !assignments.some(a=>a.evaluadoId===p.id && a.role===roleKey);
+    });
+    return {p, rolesFaltantes};
+  }).filter(x=>x.rolesFaltantes.length>0);
+  const totalCompletos = collaborators.length - incompletos.length;
+
   if(collaborators.length===0){
     return (
       <section>
@@ -2693,6 +2704,26 @@ const VistaAsignaciones = ({periodo, collaborators, assignments, evaluations, on
         <div className="view-head-actions">
           <button className="btn secondary small" onClick={()=>window.print()}>Imprimir</button>
         </div>
+      </div>
+
+      <div className="card no-print" style={{borderColor: incompletos.length>0 ? 'var(--clay)' : 'var(--moss)', marginBottom:18}}>
+        <h3>Validación antes de lanzar</h3>
+        {incompletos.length===0 ? (
+          <p style={{margin:0}}><span className="tag moss">✓ Completo</span> Los {collaborators.length} colaboradores tienen evaluador asignado en cada rol que su categoría requiere.</p>
+        ) : (
+          <>
+            <p className="hint" style={{marginBottom:10}}>
+              <span className="tag clay">{incompletos.length} incompletos</span> de {collaborators.length} colaboradores — a estos les falta asignar a alguien en al menos un rol:
+            </p>
+            <ul style={{margin:0, paddingLeft:20, fontSize:13}}>
+              {incompletos.map(({p,rolesFaltantes})=>(
+                <li key={p.id} style={{marginBottom:4}}>
+                  <strong>{p.nombre}</strong> — falta: {rolesFaltantes.map(r=>ROLES.find(x=>x.key===r)?.label || r).join(', ')}
+                </li>
+              ))}
+            </ul>
+          </>
+        )}
       </div>
 
       <div className="no-print">
