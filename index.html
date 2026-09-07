@@ -578,13 +578,19 @@ function getQuestionnaireFor(questionnaires, componente, collaborator){
     if(porColaborador) return porColaborador;
   }
   if(componente === QUIZ_COMPONENT){
-    // Conocimientos básicos: a veces es igual para todos (general), a veces varía por área.
+    // Conocimientos básicos: puede ser igual para todos (general), variar por
+    // cargo, o variar por área — en ese orden de prioridad si hay varios.
+    const cargoQ = collaborator ? collaborator.cargo : '';
+    if(cargoQ){
+      const porCargoQ = questionnaires.find(q=>q.componente===componente && !q.colaboradorId && norm(q.cargo)===norm(cargoQ));
+      if(porCargoQ) return porCargoQ;
+    }
     const area = collaborator ? collaborator.area : '';
     if(area){
-      const specific = questionnaires.find(q=>q.componente===componente && !q.colaboradorId && norm(q.area)===norm(area));
+      const specific = questionnaires.find(q=>q.componente===componente && !q.colaboradorId && !norm(q.cargo) && norm(q.area)===norm(area));
       if(specific) return specific;
     }
-    return questionnaires.find(q=>q.componente===componente && !q.colaboradorId && !norm(q.area)) || null;
+    return questionnaires.find(q=>q.componente===componente && !q.colaboradorId && !norm(q.cargo) && !norm(q.area)) || null;
   }
   // Habilidades blandas, habilidades core y productividad: cargo específico > categoría (ej. "líder") > general.
   const cargo = collaborator ? collaborator.cargo : '';
@@ -2123,10 +2129,11 @@ const VistaCuestionarios = ({questionnaires, areas, cargos, collaborators, onSav
   const [cargoLibre, setCargoLibre] = useState('');
   const [categoriaSel, setCategoriaSel] = useState(CATEGORIES[0].key);
   const [colaboradorSel, setColaboradorSel] = useState('');
+  const [copiarDesde, setCopiarDesde] = useState('');
   const [quizFormFor, setQuizFormFor] = useState(null);
   const isQuizComp = componente===QUIZ_COMPONENT;
 
-  useEffect(()=>{ setNivel('general'); setArea(''); setCargo(''); setCargoLibre(''); setColaboradorSel(''); }, [componente]);
+  useEffect(()=>{ setNivel('general'); setArea(''); setCargo(''); setCargoLibre(''); setColaboradorSel(''); setCopiarDesde(''); }, [componente]);
 
   const crear = async () => {
     if(!nombre.trim()){ showToast('Escribe un nombre para el cuestionario'); return; }
@@ -2135,14 +2142,24 @@ const VistaCuestionarios = ({questionnaires, areas, cargos, collaborators, onSav
     if(nivel==='cargo' && !(cargo==='__otro' ? cargoLibre.trim() : cargo)){ showToast('Selecciona o escribe el cargo'); return; }
     const id = 'q_' + Date.now();
     const cargoFinal = cargo==='__otro' ? cargoLibre.trim() : cargo;
-    const data = {id, componente, nombre:nombre.trim(), preguntas:[], area:'', cargo:'', categoria:'', colaboradorId:''};
+    let preguntas = [];
+    if(copiarDesde){
+      const fuente = questionnaires.find(q=>q.id===copiarDesde);
+      if(fuente){
+        // Copia con ids nuevos: quedan independientes del cuestionario de origen,
+        // así se pueden editar por separado sin afectarlo (ej. agregar preguntas
+        // propias de un cargo encima de las generales copiadas).
+        preguntas = fuente.preguntas.map(p=>({...p, id:'p_'+Date.now()+Math.random().toString(36).slice(2,6)}));
+      }
+    }
+    const data = {id, componente, nombre:nombre.trim(), preguntas, area:'', cargo:'', categoria:'', colaboradorId:''};
     if(nivel==='colaborador') data.colaboradorId = colaboradorSel;
     else if(isQuizComp && nivel==='area') data.area = area;
-    else if(!isQuizComp && nivel==='cargo') data.cargo = cargoFinal;
+    else if(nivel==='cargo') data.cargo = cargoFinal;
     else if(!isQuizComp && nivel==='categoria') data.categoria = categoriaSel;
     await onSave(data);
-    setNombre(''); setArea(''); setCargo(''); setCargoLibre(''); setColaboradorSel(''); setNivel('general');
-    showToast('Cuestionario creado — ahora agrégale preguntas');
+    setNombre(''); setArea(''); setCargo(''); setCargoLibre(''); setColaboradorSel(''); setCopiarDesde(''); setNivel('general');
+    showToast(preguntas.length ? `Cuestionario creado con ${preguntas.length} preguntas copiadas — ya puedes editarlas` : 'Cuestionario creado — ahora agrégale preguntas');
   };
 
   const agregarPreguntaSimple = async (q, texto) => {
@@ -2166,7 +2183,11 @@ const VistaCuestionarios = ({questionnaires, areas, cargos, collaborators, onSav
       const c = (collaborators||[]).find(c=>c.id===q.colaboradorId);
       return `Solo para: ${c ? c.nombre : 'colaborador ya no existe'}`;
     }
-    if(isQuiz) return q.area ? `Área: ${q.area}` : 'General — aplica a todas las áreas';
+    if(isQuiz){
+      if(q.cargo) return `Cargo: ${q.cargo}`;
+      if(q.area) return `Área: ${q.area}`;
+      return 'General — aplica a todas las áreas y cargos';
+    }
     if(q.categoria) return `Grupo: ${CATEGORIES.find(c=>c.key===q.categoria)?.label || q.categoria}`;
     return q.cargo ? `Cargo: ${q.cargo}` : 'General — aplica a todos los cargos';
   };
@@ -2179,8 +2200,8 @@ const VistaCuestionarios = ({questionnaires, areas, cargos, collaborators, onSav
           <h2>Cuestionarios</h2>
           <p className="desc">
             <strong>Habilidades blandas, core y productividad</strong> se segmentan por <strong>cargo</strong>, por un <strong>grupo</strong> (categoría, ej. todos los líderes) o quedan <strong>generales</strong>.{' '}
-            <strong>Conocimientos básicos</strong> se segmenta por <strong>área</strong> y se responde como quiz de opción múltiple con calificación automática; los demás componentes se responden en escala de 1 a 5.{' '}
-            En cualquier componente puedes además dirigir un cuestionario a <strong>una sola persona</strong> — si existe uno así para alguien, ese siempre tiene prioridad sobre los demás.
+            <strong>Conocimientos básicos</strong> se puede segmentar por <strong>cargo</strong> o por <strong>área</strong> (si tiene ambos, el de cargo gana) y se responde como quiz de opción múltiple con calificación automática; los demás componentes se responden en escala de 1 a 5.{' '}
+            En cualquier componente puedes además dirigir un cuestionario a <strong>una sola persona</strong> — si existe uno así para alguien, ese siempre tiene prioridad sobre los demás. Al crear uno nuevo, puedes copiar las preguntas de otro cuestionario existente como punto de partida y editarlas después sin afectar al original.
           </p>
         </div>
         <div className="view-head-actions">
@@ -2201,15 +2222,11 @@ const VistaCuestionarios = ({questionnaires, areas, cargos, collaborators, onSav
           <div className="field">
             <label>Aplica a</label>
             <select value={nivel} onChange={e=>setNivel(e.target.value)}>
-              <option value="general">General — {isQuizComp?'todas las áreas':'todos los cargos'}</option>
-              {isQuizComp ? (
-                <option value="area">Un área específica</option>
-              ) : (
-                <>
-                  <option value="categoria">Un grupo (ej. todos los líderes)</option>
-                  <option value="cargo">Un cargo específico</option>
-                </>
-              )}
+              <option value="general">General — {isQuizComp?'todas las áreas y cargos':'todos los cargos'}</option>
+              {isQuizComp && <option value="cargo">Un cargo específico</option>}
+              {isQuizComp && <option value="area">Un área específica</option>}
+              {!isQuizComp && <option value="categoria">Un grupo (ej. todos los líderes)</option>}
+              {!isQuizComp && <option value="cargo">Un cargo específico</option>}
               <option value="colaborador">Una sola persona</option>
             </select>
           </div>
@@ -2233,7 +2250,7 @@ const VistaCuestionarios = ({questionnaires, areas, cargos, collaborators, onSav
             <p className="hint">Aplica a todos los colaboradores de este grupo, sin importar su cargo exacto — a menos que alguno tenga además un cuestionario por cargo o por persona, que tiene prioridad.</p>
           </div>
         )}
-        {nivel==='cargo' && !isQuizComp && (
+        {nivel==='cargo' && (
           <div className="field" style={{maxWidth:300}}>
             <label>Cargo</label>
             <select value={cargo} onChange={e=>setCargo(e.target.value)}>
@@ -2244,6 +2261,7 @@ const VistaCuestionarios = ({questionnaires, areas, cargos, collaborators, onSav
             {cargo==='__otro' && (
               <input type="text" style={{marginTop:8}} value={cargoLibre} onChange={e=>setCargoLibre(e.target.value)} placeholder="Nombre exacto del cargo"/>
             )}
+            {isQuizComp && <p className="hint">Si además tienes un cuestionario por área para alguien con este cargo, el de cargo tiene prioridad.</p>}
           </div>
         )}
         {nivel==='colaborador' && (
@@ -2256,6 +2274,21 @@ const VistaCuestionarios = ({questionnaires, areas, cargos, collaborators, onSav
             <p className="hint">Este cuestionario reemplaza a cualquier otro para esta persona en este componente.</p>
           </div>
         )}
+
+        {nivel!=='general' && (() => {
+          const fuentes = questionnaires.filter(q=>q.componente===componente);
+          if(fuentes.length===0) return null;
+          return (
+            <div className="field" style={{maxWidth:360}}>
+              <label>Copiar preguntas desde (opcional)</label>
+              <select value={copiarDesde} onChange={e=>setCopiarDesde(e.target.value)}>
+                <option value="">Empezar en blanco</option>
+                {fuentes.map(q=><option key={q.id} value={q.id}>{q.nombre} ({q.preguntas.length} preguntas)</option>)}
+              </select>
+              <p className="hint">Copia las preguntas de ese cuestionario como punto de partida — quedan independientes, puedes editarlas o agregar más solo aquí, sin afectar al original.</p>
+            </div>
+          );
+        })()}
 
         <button className="btn" style={{marginTop:12}} onClick={crear}>Crear cuestionario</button>
       </div>
