@@ -500,8 +500,21 @@ function resolveComponentWeights(componentWeights, componentWeightsByCategoria, 
   const override = componentWeightsByCategoria && componentWeightsByCategoria[categoria] && componentWeightsByCategoria[categoria][roleKey];
   return override || (componentWeights[roleKey] || {});
 }
-function roleScoresFor(collab, evaluatorWeights, componentWeights, evaluations, componentWeightsByCategoria){
-  const roleWeights = evaluatorWeights[collab.categoria] || {};
+// Igual que resolveComponentWeights, pero para QUIÉN evalúa a quién: por
+// defecto lo decide la categoría del colaborador, pero si su CARGO exacto
+// tiene su propia excepción definida (evaluatorWeightsByCargo), esa gana —
+// dos personas de la misma categoría pueden necesitar combinaciones de
+// evaluadores distintas según su cargo real.
+function resolveEvaluatorWeights(evaluatorWeights, evaluatorWeightsByCargo, categoria, cargo){
+  const norm = (s)=> (s||'').trim().toLowerCase();
+  if(cargo && evaluatorWeightsByCargo){
+    const key = Object.keys(evaluatorWeightsByCargo).find(k=>norm(k)===norm(cargo));
+    if(key) return evaluatorWeightsByCargo[key];
+  }
+  return (evaluatorWeights && evaluatorWeights[categoria]) || {};
+}
+function roleScoresFor(collab, evaluatorWeights, componentWeights, evaluations, componentWeightsByCategoria, evaluatorWeightsByCargo){
+  const roleWeights = resolveEvaluatorWeights(evaluatorWeights, evaluatorWeightsByCargo, collab.categoria, collab.cargo);
   const result = {};
   Object.keys(roleWeights).forEach(roleKey=>{
     const entries = evaluations.filter(e=>e.collaboratorId===collab.id && e.role===roleKey);
@@ -512,17 +525,17 @@ function roleScoresFor(collab, evaluatorWeights, componentWeights, evaluations, 
   });
   return result;
 }
-function finalScoreFor(collab, evaluatorWeights, componentWeights, evaluations, componentWeightsByCategoria){
-  const roleWeights = evaluatorWeights[collab.categoria] || {};
-  const rScores = roleScoresFor(collab, evaluatorWeights, componentWeights, evaluations, componentWeightsByCategoria);
+function finalScoreFor(collab, evaluatorWeights, componentWeights, evaluations, componentWeightsByCategoria, evaluatorWeightsByCargo){
+  const roleWeights = resolveEvaluatorWeights(evaluatorWeights, evaluatorWeightsByCargo, collab.categoria, collab.cargo);
+  const rScores = roleScoresFor(collab, evaluatorWeights, componentWeights, evaluations, componentWeightsByCategoria, evaluatorWeightsByCargo);
   let sum=0, wsum=0;
   Object.entries(roleWeights).forEach(([roleKey,w])=>{
     if(rScores[roleKey]!==null && rScores[roleKey]!==undefined){ sum += rScores[roleKey]*w; wsum += w; }
   });
   return wsum>0 ? {score:sum/wsum, coverage:wsum, roleScores:rScores} : {score:null, coverage:0, roleScores:rScores};
 }
-function componentBreakdownFor(collab, evaluatorWeights, componentWeights, evaluations, componentWeightsByCategoria){
-  const roleWeights = evaluatorWeights[collab.categoria] || {};
+function componentBreakdownFor(collab, evaluatorWeights, componentWeights, evaluations, componentWeightsByCategoria, evaluatorWeightsByCargo){
+  const roleWeights = resolveEvaluatorWeights(evaluatorWeights, evaluatorWeightsByCargo, collab.categoria, collab.cargo);
   const totals = {}; COMPONENTS.forEach(c=>totals[c.key]={sum:0,wsum:0});
   Object.entries(roleWeights).forEach(([roleKey,evalW])=>{
     const entries = evaluations.filter(e=>e.collaboratorId===collab.id && e.role===roleKey);
@@ -1006,7 +1019,7 @@ const PortalApp = ({marca}) => {
 
   const getPendingTasks = (u) => {
     const tasks = [];
-    const roleWeights = (config && config.evaluatorWeights && config.evaluatorWeights[u.categoria]) || {};
+    const roleWeights = config ? resolveEvaluatorWeights(config.evaluatorWeights, config.evaluatorWeightsByCargo, u.categoria, u.cargo) : {};
     if('autoevaluacion' in roleWeights && !u.soloEvaluador){
       const done = evaluations.some(e=>e.collaboratorId===u.id && e.role==='autoevaluacion');
       tasks.push({kind:'self', assignmentId:'self-'+u.id, evaluadoId:u.id, evaluadoNombre:u.nombre, role:'autoevaluacion', done});
@@ -1428,7 +1441,7 @@ const AdminApp = ({user, marca}) => {
           <VistaPeriodos periodos={periodos} periodoId={periodoId} onSelect={setPeriodoId}/>
         )}
         {vista==='config' && periodo && !isSupervisor && (
-          <VistaParametrizacion periodo={periodo} onSave={savePeriodo}/>
+          <VistaParametrizacion periodo={periodo} cargos={cargosDisponibles} collaborators={collaborators} onSave={savePeriodo}/>
         )}
         {vista==='questionnaires' && periodo && !isSupervisor && (
           <VistaCuestionarios questionnaires={questionnaires} areas={areas} cargos={cargosDisponibles} collaborators={collaborators} onSave={saveQuestionnaire} onDelete={deleteQuestionnaire}/>
@@ -1880,7 +1893,7 @@ const VistaUsuarios = ({usuarios, supervisores, areas, currentUid, onSaveSupervi
     </section>
   );
 };
-const VistaParametrizacion = ({periodo, onSave}) => {
+const VistaParametrizacion = ({periodo, cargos, collaborators, onSave}) => {
   // Completa con los valores de ejemplo cualquier categoría o rol que falte en
   // lo guardado en Firestore — así un periodo creado ANTES de agregar una
   // categoría nueva (p. ej. "Órganos de Administración y Control") no revienta
@@ -1927,6 +1940,8 @@ const VistaParametrizacion = ({periodo, onSave}) => {
   const [fechaLimite, setFechaLimite] = useState(periodo.fechaLimite || '');
   const [componentWeights, setComponentWeights] = useState(fillComponentWeights(JSON.parse(JSON.stringify(periodo.componentWeights || defaultComponentWeights()))));
   const [evaluatorWeights, setEvaluatorWeights] = useState(fillEvaluatorWeights(JSON.parse(JSON.stringify(periodo.evaluatorWeights || defaultEvaluatorWeights()))));
+  const [evaluatorWeightsByCargo, setEvaluatorWeightsByCargo] = useState(JSON.parse(JSON.stringify(periodo.evaluatorWeightsByCargo || {})));
+  const [nuevoCargoExcepcion, setNuevoCargoExcepcion] = useState('');
   const [componentWeightsByCategoria, setComponentWeightsByCategoria] = useState(()=>{
     const cw = fillComponentWeights(JSON.parse(JSON.stringify(periodo.componentWeights || defaultComponentWeights())));
     const ew = fillEvaluatorWeights(JSON.parse(JSON.stringify(periodo.evaluatorWeights || defaultEvaluatorWeights())));
@@ -1940,6 +1955,7 @@ const VistaParametrizacion = ({periodo, onSave}) => {
     setComponentWeights(cw);
     const ew = fillEvaluatorWeights(JSON.parse(JSON.stringify(periodo.evaluatorWeights || defaultEvaluatorWeights())));
     setEvaluatorWeights(ew);
+    setEvaluatorWeightsByCargo(JSON.parse(JSON.stringify(periodo.evaluatorWeightsByCargo || {})));
     setComponentWeightsByCategoria(fillComponentWeightsByCategoria(JSON.parse(JSON.stringify(periodo.componentWeightsByCategoria || {})), cw, Object.keys(ew.organosControl||{})));
   }, [periodo.id]);
 
@@ -1971,8 +1987,40 @@ const VistaParametrizacion = ({periodo, onSave}) => {
     setEvaluatorWeights(prev=>({...prev, [catKey]:{...prev[catKey], [roleKey]: Number(val)||0}}));
   };
 
+  // Excepciones por cargo: dos cargos con la misma categoría pueden necesitar
+  // combinaciones de evaluadores distintas (ej. un "Director de Agencia" con
+  // compañero + persona a cargo + jefe, y un "Líder de Riesgos" con solo
+  // compañero + autoevaluación, aunque ambos sean "Líder"). Al agregar una
+  // excepción, arranca como copia de la tabla de su categoría actual, para que
+  // el admin ajuste desde ahí en vez de partir de cero.
+  const cargoTotal = (cargo) => Object.values(evaluatorWeightsByCargo[cargo]||{}).reduce((s,v)=>s+(v||0),0);
+  const agregarExcepcionCargo = () => {
+    const cargo = nuevoCargoExcepcion.trim();
+    if(!cargo){ showToast('Selecciona o escribe el cargo'); return; }
+    if(evaluatorWeightsByCargo[cargo]){ showToast('Ese cargo ya tiene una excepción — edítala abajo'); return; }
+    const colabConEseCargo = (collaborators||[]).find(c=>(c.cargo||'').trim().toLowerCase()===cargo.toLowerCase());
+    const categoriaBase = colabConEseCargo ? colabConEseCargo.categoria : CATEGORIES[0].key;
+    setEvaluatorWeightsByCargo(prev=>({...prev, [cargo]: {...(evaluatorWeights[categoriaBase]||{})}}));
+    setNuevoCargoExcepcion('');
+  };
+  const quitarExcepcionCargo = (cargo) => {
+    if(!window.confirm(`¿Quitar la excepción de "${cargo}"? Volverá a usar la tabla de su categoría.`)) return;
+    setEvaluatorWeightsByCargo(prev=>{ const next={...prev}; delete next[cargo]; return next; });
+  };
+  const toggleCargoRole = (cargo, roleKey, checked) => {
+    setEvaluatorWeightsByCargo(prev=>{
+      const next = {...prev, [cargo]:{...prev[cargo]}};
+      if(checked) next[cargo][roleKey] = next[cargo][roleKey] || 0;
+      else delete next[cargo][roleKey];
+      return next;
+    });
+  };
+  const setCargoRoleWeight = (cargo, roleKey, val) => {
+    setEvaluatorWeightsByCargo(prev=>({...prev, [cargo]:{...prev[cargo], [roleKey]: Number(val)||0}}));
+  };
+
   const save = async () => {
-    await onSave({periodoLabel, periodo: periodoLabel, fechaLimite, componentWeights, evaluatorWeights, componentWeightsByCategoria});
+    await onSave({periodoLabel, periodo: periodoLabel, fechaLimite, componentWeights, evaluatorWeights, componentWeightsByCategoria, evaluatorWeightsByCargo});
     showToast('Configuración guardada');
   };
   const reset = () => {
@@ -1981,6 +2029,7 @@ const VistaParametrizacion = ({periodo, onSave}) => {
     setComponentWeights(cw);
     setEvaluatorWeights(defaultEvaluatorWeights());
     setComponentWeightsByCategoria({organosControl:{autoevaluacion:{...(cw.autoevaluacion||{})}}});
+    setEvaluatorWeightsByCargo({});
   };
 
   return (
@@ -2075,6 +2124,55 @@ const VistaParametrizacion = ({periodo, onSave}) => {
             </tbody></table>
             <div className="ribbon">
               {Object.entries(evaluatorWeights[cat.key]||{}).map(([role,val])=> val ? <span key={role} style={{width:val+'%', background:ROLE_COLORS[role]}} title={`${role}: ${val}%`}></span> : null)}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <div className="card no-print">
+        <h3>Excepciones por cargo</h3>
+        <p className="hint">
+          Si dos cargos comparten categoría pero necesitan una combinación de evaluadores distinta (por ejemplo, un
+          Director de Agencia con compañero + persona a cargo + jefe, y un Líder de Riesgos con solo compañero),
+          define aquí una excepción para ese cargo exacto — reemplaza por completo la tabla de su categoría, solo para él.
+        </p>
+        <div className="field-row" style={{alignItems:'flex-end'}}>
+          <div className="field" style={{maxWidth:320}}>
+            <label>Cargo</label>
+            {(cargos||[]).length>0 ? (
+              <select value={nuevoCargoExcepcion} onChange={e=>setNuevoCargoExcepcion(e.target.value)}>
+                <option value="">Selecciona un cargo</option>
+                {(cargos||[]).filter(c=>!evaluatorWeightsByCargo[c]).map(c=><option key={c} value={c}>{c}</option>)}
+              </select>
+            ) : (
+              <input type="text" value={nuevoCargoExcepcion} onChange={e=>setNuevoCargoExcepcion(e.target.value)} placeholder="Nombre exacto del cargo"/>
+            )}
+          </div>
+          <button className="btn secondary small" onClick={agregarExcepcionCargo}>+ Agregar excepción</button>
+        </div>
+
+        {Object.keys(evaluatorWeightsByCargo).length===0 ? (
+          <p className="hint" style={{marginTop:14}}>Sin excepciones todavía — todos los cargos usan la tabla de su categoría.</p>
+        ) : Object.keys(evaluatorWeightsByCargo).map(cargo=>(
+          <div className="config-cat" key={cargo} style={{marginTop:16}}>
+            <h4>
+              {cargo} <span className={"row-total " + (cargoTotal(cargo)===100?'ok':'bad')}>{cargoTotal(cargo)}%</span>
+              <button className="btn ghost small" style={{marginLeft:10}} onClick={()=>quitarExcepcionCargo(cargo)}>Quitar excepción</button>
+            </h4>
+            <table><tbody>
+              {ROLES.map(role=>{
+                const active = role.key in (evaluatorWeightsByCargo[cargo]||{});
+                return (
+                  <tr key={role.key}>
+                    <td style={{width:26}}><span className="checkline"><input type="checkbox" checked={active} onChange={e=>toggleCargoRole(cargo, role.key, e.target.checked)}/></span></td>
+                    <td>{role.label}</td>
+                    <td style={{width:120}}><input type="number" min="0" max="100" className="pct-input" disabled={!active} value={active ? evaluatorWeightsByCargo[cargo][role.key] : 0} onChange={e=>setCargoRoleWeight(cargo, role.key, e.target.value)}/> %</td>
+                  </tr>
+                );
+              })}
+            </tbody></table>
+            <div className="ribbon">
+              {Object.entries(evaluatorWeightsByCargo[cargo]||{}).map(([role,val])=> val ? <span key={role} style={{width:val+'%', background:ROLE_COLORS[role]}} title={`${role}: ${val}%`}></span> : null)}
             </div>
           </div>
         ))}
@@ -2552,7 +2650,7 @@ const VistaColaboradores = ({periodo, collaborators, evaluations, areas, restric
         ) : filtered.map(p=>{
           const initials = p.nombre.split(' ').map(w=>w[0]).slice(0,2).join('').toUpperCase();
           const catLabel = CATEGORIES.find(c=>c.key===p.categoria)?.label || p.categoria;
-          const fs = finalScoreFor(p, periodo.evaluatorWeights, periodo.componentWeights, evaluations, periodo.componentWeightsByCategoria);
+          const fs = finalScoreFor(p, periodo.evaluatorWeights, periodo.componentWeights, evaluations, periodo.componentWeightsByCategoria, periodo.evaluatorWeightsByCargo);
           const editando = editingId === p.id;
           return (
             <div key={p.id}>
@@ -2672,7 +2770,7 @@ const VistaAsignaciones = ({periodo, collaborators, assignments, evaluations, on
   };
 
   const incompletos = collaborators.map(p=>{
-    const roleWeights = periodo.evaluatorWeights[p.categoria] || {};
+    const roleWeights = resolveEvaluatorWeights(periodo.evaluatorWeights, periodo.evaluatorWeightsByCargo, p.categoria, p.cargo);
     const rolesFaltantes = Object.keys(roleWeights).filter(roleKey=>{
       if(roleKey==='autoevaluacion') return false; // se asigna sola, no requiere a nadie
       if(!roleWeights[roleKey]) return false; // peso 0, ese rol no aplica de verdad
@@ -2728,7 +2826,7 @@ const VistaAsignaciones = ({periodo, collaborators, assignments, evaluations, on
 
       <div className="no-print">
       {collaborators.map(evaluado=>{
-        const roleWeights = periodo.evaluatorWeights[evaluado.categoria] || {};
+        const roleWeights = resolveEvaluatorWeights(periodo.evaluatorWeights, periodo.evaluatorWeightsByCargo, evaluado.categoria, evaluado.cargo);
         const catLabel = CATEGORIES.find(c=>c.key===evaluado.categoria)?.label || evaluado.categoria;
         return (
           <div className="assign-collab" key={evaluado.id}>
@@ -2793,7 +2891,7 @@ const VistaAsignaciones = ({periodo, collaborators, assignments, evaluations, on
             <p>Periodo: {periodo.periodoLabel || periodo.nombre} · Generado el {new Date().toLocaleDateString('es-CO', {year:'numeric', month:'long', day:'numeric'})}</p>
           </div>
           {collaborators.map(evaluado=>{
-            const roleWeights = periodo.evaluatorWeights[evaluado.categoria] || {};
+            const roleWeights = resolveEvaluatorWeights(periodo.evaluatorWeights, periodo.evaluatorWeightsByCargo, evaluado.categoria, evaluado.cargo);
             const catLabel = CATEGORIES.find(c=>c.key===evaluado.categoria)?.label || evaluado.categoria;
             return (
               <div key={evaluado.id} style={{marginBottom:14}}>
@@ -2856,7 +2954,7 @@ const VistaCapturaManual = ({periodo, collaborators, evaluations, onSave, onDele
     );
   }
 
-  const roleWeights = collab ? (periodo.evaluatorWeights[collab.categoria] || {}) : {};
+  const roleWeights = collab ? resolveEvaluatorWeights(periodo.evaluatorWeights, periodo.evaluatorWeightsByCargo, collab.categoria, collab.cargo) : {};
 
   return (
     <section>
@@ -2948,7 +3046,7 @@ const VistaResultados = ({periodo, collaborators, evaluations}) => {
   const scoreConfig = periodo.scoreConfig || defaultScoreConfig();
 
   const rows = collaborators.map(p=>({
-    p, fs: finalScoreFor(p, periodo.evaluatorWeights, periodo.componentWeights, evaluations, periodo.componentWeightsByCategoria)
+    p, fs: finalScoreFor(p, periodo.evaluatorWeights, periodo.componentWeights, evaluations, periodo.componentWeightsByCategoria, periodo.evaluatorWeightsByCargo)
   }));
   const evaluated = rows.filter(r=>r.fs.score!==null);
   const avg = evaluated.length ? evaluated.reduce((s,r)=>s+r.fs.score,0)/evaluated.length : null;
@@ -3016,8 +3114,8 @@ const VistaResultados = ({periodo, collaborators, evaluations}) => {
     rows.forEach(({p,fs})=>{
       const catLabel = CATEGORIES.find(c=>c.key===p.categoria)?.label || p.categoria;
       const estado = fs.score!==null ? classifySemaforo(fs.score, scoreConfig) : null;
-      const breakdown = componentBreakdownFor(p, periodo.evaluatorWeights, periodo.componentWeights, evaluations, periodo.componentWeightsByCategoria);
-      const roleWeights = periodo.evaluatorWeights[p.categoria] || {};
+      const breakdown = componentBreakdownFor(p, periodo.evaluatorWeights, periodo.componentWeights, evaluations, periodo.componentWeightsByCategoria, periodo.evaluatorWeightsByCargo);
+      const roleWeights = resolveEvaluatorWeights(periodo.evaluatorWeights, periodo.evaluatorWeightsByCargo, p.categoria, p.cargo);
 
       children.push(new Paragraph({text:p.nombre, heading:HeadingLevel.HEADING_1, pageBreakBefore:true}));
       children.push(new Paragraph({text:`${p.cargo || 'Sin cargo'} ${p.area ? '· '+p.area : ''} · ${catLabel}`}));
@@ -3062,8 +3160,8 @@ const VistaResultados = ({periodo, collaborators, evaluations}) => {
     for(const {p,fs} of rows){
       const catLabel = CATEGORIES.find(c=>c.key===p.categoria)?.label || p.categoria;
       const estado = fs.score!==null ? classifySemaforo(fs.score, scoreConfig) : null;
-      const breakdown = componentBreakdownFor(p, periodo.evaluatorWeights, periodo.componentWeights, evaluations, periodo.componentWeightsByCategoria);
-      const roleWeights = periodo.evaluatorWeights[p.categoria] || {};
+      const breakdown = componentBreakdownFor(p, periodo.evaluatorWeights, periodo.componentWeights, evaluations, periodo.componentWeightsByCategoria, periodo.evaluatorWeightsByCargo);
+      const roleWeights = resolveEvaluatorWeights(periodo.evaluatorWeights, periodo.evaluatorWeightsByCargo, p.categoria, p.cargo);
 
       const children = [
         new Paragraph({text:`${ENTIDAD_NOMBRE} — Informe individual`, heading:HeadingLevel.HEADING_1}),
@@ -3163,7 +3261,7 @@ const VistaResultados = ({periodo, collaborators, evaluations}) => {
         {collaborators.length===0 ? <div className="empty">Aún no hay colaboradores. Agrégalos en la sección Colaboradores.</div> : rows.map(({p,fs})=>{
           const catLabel = CATEGORIES.find(c=>c.key===p.categoria)?.label || p.categoria;
           const estado = fs.score!==null ? classifySemaforo(fs.score, scoreConfig) : null;
-          const roleWeights = periodo.evaluatorWeights[p.categoria] || {};
+          const roleWeights = resolveEvaluatorWeights(periodo.evaluatorWeights, periodo.evaluatorWeightsByCargo, p.categoria, p.cargo);
           const open = selectedId===p.id;
           return (
             <div key={p.id}>
@@ -3227,8 +3325,8 @@ const VistaResultados = ({periodo, collaborators, evaluations}) => {
         {rows.map(({p,fs})=>{
           const catLabel = CATEGORIES.find(c=>c.key===p.categoria)?.label || p.categoria;
           const estado = fs.score!==null ? classifySemaforo(fs.score, scoreConfig) : null;
-          const breakdown = componentBreakdownFor(p, periodo.evaluatorWeights, periodo.componentWeights, evaluations, periodo.componentWeightsByCategoria);
-          const roleWeights = periodo.evaluatorWeights[p.categoria] || {};
+          const breakdown = componentBreakdownFor(p, periodo.evaluatorWeights, periodo.componentWeights, evaluations, periodo.componentWeightsByCategoria, periodo.evaluatorWeightsByCargo);
+          const roleWeights = resolveEvaluatorWeights(periodo.evaluatorWeights, periodo.evaluatorWeightsByCargo, p.categoria, p.cargo);
           return (
             <div className="print-page" key={p.id}>
               <div className="print-header">
@@ -3285,7 +3383,7 @@ const VistaResultados = ({periodo, collaborators, evaluations}) => {
 };
 
 const ResultDetail = ({p, fs, periodo, evaluations}) => {
-  const breakdown = componentBreakdownFor(p, periodo.evaluatorWeights, periodo.componentWeights, evaluations, periodo.componentWeightsByCategoria);
+  const breakdown = componentBreakdownFor(p, periodo.evaluatorWeights, periodo.componentWeights, evaluations, periodo.componentWeightsByCategoria, periodo.evaluatorWeightsByCargo);
 
   return (
     <div className="detail-panel">
@@ -3299,7 +3397,7 @@ const ResultDetail = ({p, fs, periodo, evaluations}) => {
       <div className="field-row">
         <div>
           <h4 style={{margin:'0 0 10px', fontFamily:'var(--font-display)'}}>Por evaluador</h4>
-          {Object.entries(periodo.evaluatorWeights[p.categoria]||{}).map(([roleKey,w])=>{
+          {Object.entries(resolveEvaluatorWeights(periodo.evaluatorWeights, periodo.evaluatorWeightsByCargo, p.categoria, p.cargo)).map(([roleKey,w])=>{
             const val = fs.roleScores[roleKey];
             return (
               <div className="breakdown-row" key={roleKey}>
