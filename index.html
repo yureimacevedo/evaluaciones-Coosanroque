@@ -1133,7 +1133,7 @@ const PortalForm = ({task, portalUser, config, collaborators, questionnaires, ev
   // tarea es la autoevaluación en sí, nunca para otros roles que evalúan a esta
   // categoría.
   const isOrganosControlSelf = evaluado && evaluado.categoria === 'organosControl' && task.kind === 'self';
-  const compWeights = (config && config.componentWeights && config.componentWeights[task.role]) || {};
+  const compWeights = config ? resolveComponentWeights(config.componentWeights||{}, config.componentWeightsByCategoria, evaluado ? evaluado.categoria : null, task.role) : {};
   const applicableComponents = COMPONENTS.filter(c=>(compWeights[c.key]||0) > 0);
   const managementComponents = COMPONENTS.filter(c=>c.key!==QUIZ_COMPONENT);
   const quizComponent = COMPONENTS.find(c=>c.key===QUIZ_COMPONENT);
@@ -1892,15 +1892,19 @@ const VistaParametrizacion = ({periodo, onSave}) => {
     return merged;
   };
   // Excepción por categoría: hoy solo "Órganos de Administración y Control"
-  // tiene su propia tabla de pesos por componente para su autoevaluación
-  // (distinta a la de Gerencia/Líder/Operativo). Si el periodo aún no tiene
-  // nada guardado para esta categoría, arranca como copia de la tabla global
-  // para que el admin la ajuste desde aquí sin partir de ceros.
-  const fillComponentWeightsByCategoria = (saved, baseComponentWeights) => {
-    const merged = {...(saved||{})};
-    if(!merged.organosControl){
-      merged.organosControl = {autoevaluacion: {...(baseComponentWeights.autoevaluacion||{})}};
-    }
+  // tiene su propia tabla de pesos por componente (distinta a la de
+  // Gerencia/Líder/Operativo) — y la tiene para CADA rol que esté habilitado
+  // para ella (autoevaluación, y ahora también "Jefe inmediato / Superior" si
+  // el presidente evalúa a los demás integrantes). Si el periodo aún no tiene
+  // nada guardado para alguno de esos roles, arranca como copia de la tabla
+  // general para que el admin la ajuste desde aquí sin partir de ceros.
+  const fillComponentWeightsByCategoria = (saved, baseComponentWeights, orgRoleKeys) => {
+    const merged = {...(saved||{}), organosControl:{...((saved||{}).organosControl||{})}};
+    (orgRoleKeys && orgRoleKeys.length ? orgRoleKeys : ['autoevaluacion']).forEach(roleKey=>{
+      if(!merged.organosControl[roleKey]){
+        merged.organosControl[roleKey] = {...(baseComponentWeights[roleKey]||{})};
+      }
+    });
     return merged;
   };
   const [periodoLabel, setPeriodoLabel] = useState(periodo.periodoLabel || periodo.nombre || '');
@@ -1909,7 +1913,8 @@ const VistaParametrizacion = ({periodo, onSave}) => {
   const [evaluatorWeights, setEvaluatorWeights] = useState(fillEvaluatorWeights(JSON.parse(JSON.stringify(periodo.evaluatorWeights || defaultEvaluatorWeights()))));
   const [componentWeightsByCategoria, setComponentWeightsByCategoria] = useState(()=>{
     const cw = fillComponentWeights(JSON.parse(JSON.stringify(periodo.componentWeights || defaultComponentWeights())));
-    return fillComponentWeightsByCategoria(JSON.parse(JSON.stringify(periodo.componentWeightsByCategoria || {})), cw);
+    const ew = fillEvaluatorWeights(JSON.parse(JSON.stringify(periodo.evaluatorWeights || defaultEvaluatorWeights())));
+    return fillComponentWeightsByCategoria(JSON.parse(JSON.stringify(periodo.componentWeightsByCategoria || {})), cw, Object.keys(ew.organosControl||{}));
   });
 
   useEffect(()=>{
@@ -1917,8 +1922,9 @@ const VistaParametrizacion = ({periodo, onSave}) => {
     setFechaLimite(periodo.fechaLimite || '');
     const cw = fillComponentWeights(JSON.parse(JSON.stringify(periodo.componentWeights || defaultComponentWeights())));
     setComponentWeights(cw);
-    setEvaluatorWeights(fillEvaluatorWeights(JSON.parse(JSON.stringify(periodo.evaluatorWeights || defaultEvaluatorWeights()))));
-    setComponentWeightsByCategoria(fillComponentWeightsByCategoria(JSON.parse(JSON.stringify(periodo.componentWeightsByCategoria || {})), cw));
+    const ew = fillEvaluatorWeights(JSON.parse(JSON.stringify(periodo.evaluatorWeights || defaultEvaluatorWeights())));
+    setEvaluatorWeights(ew);
+    setComponentWeightsByCategoria(fillComponentWeightsByCategoria(JSON.parse(JSON.stringify(periodo.componentWeightsByCategoria || {})), cw, Object.keys(ew.organosControl||{})));
   }, [periodo.id]);
 
   const rowTotal = (roleKey) => COMPONENTS.reduce((s,c)=>s+((componentWeights[roleKey]||{})[c.key]||0),0);
@@ -1938,6 +1944,12 @@ const VistaParametrizacion = ({periodo, onSave}) => {
       else delete next[catKey][roleKey];
       return next;
     });
+    if(catKey==='organosControl' && checked){
+      setComponentWeightsByCategoria(prev=>{
+        if(prev.organosControl && prev.organosControl[roleKey]) return prev;
+        return {...prev, organosControl:{...(prev.organosControl||{}), [roleKey]:{...(componentWeights[roleKey]||{})}}};
+      });
+    }
   };
   const setRoleWeight = (catKey, roleKey, val) => {
     setEvaluatorWeights(prev=>({...prev, [catKey]:{...prev[catKey], [roleKey]: Number(val)||0}}));
@@ -2002,22 +2014,27 @@ const VistaParametrizacion = ({periodo, onSave}) => {
       </div>
 
       <div className="card no-print">
-        <h3>Puntaje por componente — Autoevaluación de Órganos de Administración y Control</h3>
-        <p className="hint">Esta categoría no comparte la tabla general de arriba: define aquí, aparte, cuánto pesa cada bloque en su autoevaluación (por ejemplo, un peso distinto para el quiz de conocimiento normativo).</p>
+        <h3>Puntaje por componente — Órganos de Administración y Control</h3>
+        <p className="hint">Esta categoría no comparte la tabla general de arriba: define aquí, aparte, cuánto pesa cada bloque para cada tipo de evaluador que tenga habilitado (por ejemplo, un peso distinto para el quiz de conocimiento normativo, que solo aplica a la autoevaluación).</p>
         <table>
           <thead><tr><th>Evaluador</th><th>Habilidades blandas</th><th>Habilidades core</th><th>Productividad</th><th>Conocimientos básicos</th><th>Total</th></tr></thead>
           <tbody>
-            <tr>
-              <td><strong>Autoevaluación</strong></td>
-              {COMPONENTS.map(c=>(
-                <td key={c.key}>
-                  <input type="number" min="0" max="100" className="pct-input"
-                    value={((componentWeightsByCategoria.organosControl||{}).autoevaluacion||{})[c.key] || 0}
-                    onChange={e=>setCatCompWeight('organosControl','autoevaluacion',c.key,e.target.value)}/> %
-                </td>
-              ))}
-              <td className={"row-total " + (catCompRowTotal('organosControl','autoevaluacion')===100 ? 'ok':'bad')}>{catCompRowTotal('organosControl','autoevaluacion')}%</td>
-            </tr>
+            {Object.keys(evaluatorWeights.organosControl||{}).map(roleKey=>{
+              const roleLabel = ROLES.find(r=>r.key===roleKey)?.label || roleKey;
+              return (
+                <tr key={roleKey}>
+                  <td><strong>{roleLabel}</strong></td>
+                  {COMPONENTS.map(c=>(
+                    <td key={c.key}>
+                      <input type="number" min="0" max="100" className="pct-input"
+                        value={((componentWeightsByCategoria.organosControl||{})[roleKey]||{})[c.key] || 0}
+                        onChange={e=>setCatCompWeight('organosControl',roleKey,c.key,e.target.value)}/> %
+                    </td>
+                  ))}
+                  <td className={"row-total " + (catCompRowTotal('organosControl',roleKey)===100 ? 'ok':'bad')}>{catCompRowTotal('organosControl',roleKey)}%</td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>
