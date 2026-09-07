@@ -1125,17 +1125,19 @@ const PortalTasks = ({user, tasks, config, onLogout, onOpenTask}) => (
 
 const PortalForm = ({task, portalUser, config, collaborators, questionnaires, evaluations, periodoId, onBack, onDone}) => {
   const evaluado = collaborators.find(c=>c.id===task.evaluadoId);
-  // Los Órganos de Administración y Control no participan del ciclo 270°: su
-  // evaluación es siempre autoevaluación de gestión + quiz normativo, sin
-  // depender de los pesos globales de componente (que están pensados para
-  // Gerencia/Líder/Operativo). Por eso este caso ignora componentWeights y usa
-  // siempre los 4 componentes de base, agrupados en 2 secciones visibles.
-  const isOrganosControl = evaluado && evaluado.categoria === 'organosControl';
+  // Los Órganos de Administración y Control se autoevalúan con el quiz normativo
+  // incluido — pero si además reciben otra evaluación (ej. del presidente del
+  // Consejo, rol "Jefe inmediato"), esa SÍ debe respetar los pesos normales por
+  // rol (que ya excluyen el quiz, porque el conocimiento normativo se autoevalúa,
+  // no lo califica un tercero). Por eso este caso especial solo aplica cuando la
+  // tarea es la autoevaluación en sí, nunca para otros roles que evalúan a esta
+  // categoría.
+  const isOrganosControlSelf = evaluado && evaluado.categoria === 'organosControl' && task.kind === 'self';
   const compWeights = (config && config.componentWeights && config.componentWeights[task.role]) || {};
   const applicableComponents = COMPONENTS.filter(c=>(compWeights[c.key]||0) > 0);
   const managementComponents = COMPONENTS.filter(c=>c.key!==QUIZ_COMPONENT);
   const quizComponent = COMPONENTS.find(c=>c.key===QUIZ_COMPONENT);
-  const componentsToScore = isOrganosControl ? COMPONENTS : applicableComponents;
+  const componentsToScore = isOrganosControlSelf ? COMPONENTS : applicableComponents;
   const existing = evaluations.find(e=>e.assignmentId===task.assignmentId);
   const readOnly = !!existing; // una vez enviada, la respuesta queda fija — no se puede editar
   const [answers, setAnswers] = useState(()=> (existing && existing.answers) ? {...existing.answers} : {});
@@ -1218,7 +1220,7 @@ const PortalForm = ({task, portalUser, config, collaborators, questionnaires, ev
           <p className="hint">Para las afirmaciones de comportamiento responde de 1 (muy bajo) a 5 (muy alto). Para el quiz de conocimientos, elige la opción correcta — se califica automáticamente.</p>
         )}
 
-        {isOrganosControl ? (
+        {isOrganosControlSelf ? (
           <React.Fragment>
             <div className="question-block">
               <div style={{fontFamily:'var(--font-display)', fontWeight:600, marginBottom:10}}>Autoevaluación de Gestión</div>
