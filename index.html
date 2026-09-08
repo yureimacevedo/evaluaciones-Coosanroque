@@ -365,6 +365,24 @@ const ROLES = [
   {key:'personasACargo', label:'Personas a cargo'},
   {key:'companeroOperativo', label:'Compañero (operativo)'},
 ];
+// Roles que de verdad le corresponden a una persona, según su categoría —
+// usar esta función en vez de leer periodo.evaluatorWeights[categoria]
+// directamente, porque hace dos limpiezas necesarias:
+// 1) Si la persona es "solo evaluador" (ej. el Consejo de Administración, que
+//    únicamente evalúa al Gerente y no recibe evaluaciones propias), no le
+//    corresponde ningún rol — ni jefe, ni par, nada.
+// 2) Quita cualquier clave de rol que ya no exista en el sistema (ej.
+//    "subordinado", de antes de que existiera "Personas a cargo") — si no se
+//    filtra, ese periodo queda pidiendo para siempre un evaluador que nunca
+//    se va a poder asignar, porque el rol ya no existe.
+function rolesRequeridosPara(periodo, p){
+  if(p.soloEvaluador) return {};
+  const raw = (periodo.evaluatorWeights && periodo.evaluatorWeights[p.categoria]) || {};
+  const validRoleKeys = ROLES.map(r=>r.key);
+  const limpio = {};
+  Object.keys(raw).forEach(k=>{ if(validRoleKeys.includes(k)) limpio[k] = raw[k]; });
+  return limpio;
+}
 // Las etiquetas de ROLES describen la estructura del EVALUADO (ej. "Personas a
 // cargo" = personas que reportan a él). Eso es correcto para el panel de
 // administración, pero confunde a quien está respondiendo en el portal: si tú
@@ -2713,7 +2731,7 @@ const VistaAsignaciones = ({periodo, collaborators, assignments, evaluations, on
       new Paragraph({text:`Periodo: ${periodo.periodoLabel || periodo.nombre} · Generado el ${fechaGenerado}`}),
     ];
     collaborators.forEach(evaluado=>{
-      const roleWeights = (periodo.evaluatorWeights[evaluado.categoria] || {});
+      const roleWeights = rolesRequeridosPara(periodo, evaluado);
       const catLabel = CATEGORIES.find(c=>c.key===evaluado.categoria)?.label || evaluado.categoria;
       children.push(new Paragraph({text:'', spacing:{before:200}}));
       children.push(new Paragraph({text:`${evaluado.nombre} — ${catLabel}${evaluado.cargo?' · '+evaluado.cargo:''}`, heading:HeadingLevel.HEADING_2}));
@@ -2758,7 +2776,7 @@ const VistaAsignaciones = ({periodo, collaborators, assignments, evaluations, on
   };
 
   const incompletos = collaborators.map(p=>{
-    const roleWeights = periodo.evaluatorWeights[p.categoria] || {};
+    const roleWeights = rolesRequeridosPara(periodo, p);
     const rolesFaltantes = Object.keys(roleWeights).filter(roleKey=>{
       if(roleKey==='autoevaluacion') return false; // se asigna sola, no requiere a nadie
       if(!roleWeights[roleKey]) return false; // peso 0, ese rol no aplica de verdad
@@ -2839,7 +2857,7 @@ const VistaAsignaciones = ({periodo, collaborators, assignments, evaluations, on
                           {evaluacionesDe.length===0 ? <div>— ninguna —</div> : evaluacionesDe.map(e=>(
                             <div key={e.id}>rol: "{e.role}" · evaluador: {e.evaluatorLabel || '(sin nombre)'}</div>
                           ))}
-                          <div style={{marginTop:6}}><strong>Roles que espera "{CATEGORIES.find(c=>c.key===p.categoria)?.label || p.categoria}":</strong> {Object.keys(periodo.evaluatorWeights[p.categoria]||{}).map(r=>`"${r}"`).join(', ')}</div>
+                          <div style={{marginTop:6}}><strong>Roles que espera "{CATEGORIES.find(c=>c.key===p.categoria)?.label || p.categoria}":</strong> {Object.keys(rolesRequeridosPara(periodo, p)).map(r=>`"${r}"`).join(', ') || '(ninguno — solo evaluador)'}</div>
                         </div>
                       </li>
                     );
@@ -2853,7 +2871,7 @@ const VistaAsignaciones = ({periodo, collaborators, assignments, evaluations, on
 
       <div className="no-print">
       {collaborators.map(evaluado=>{
-        const roleWeights = (periodo.evaluatorWeights[evaluado.categoria] || {});
+        const roleWeights = rolesRequeridosPara(periodo, evaluado);
         const catLabel = CATEGORIES.find(c=>c.key===evaluado.categoria)?.label || evaluado.categoria;
         return (
           <div className="assign-collab" key={evaluado.id}>
@@ -2925,7 +2943,7 @@ const VistaAsignaciones = ({periodo, collaborators, assignments, evaluations, on
             <p>Periodo: {periodo.periodoLabel || periodo.nombre} · Generado el {new Date().toLocaleDateString('es-CO', {year:'numeric', month:'long', day:'numeric'})}</p>
           </div>
           {collaborators.map(evaluado=>{
-            const roleWeights = (periodo.evaluatorWeights[evaluado.categoria] || {});
+            const roleWeights = rolesRequeridosPara(periodo, evaluado);
             const catLabel = CATEGORIES.find(c=>c.key===evaluado.categoria)?.label || evaluado.categoria;
             return (
               <div key={evaluado.id} style={{marginBottom:14}}>
@@ -2988,7 +3006,7 @@ const VistaCapturaManual = ({periodo, collaborators, evaluations, onSave, onDele
     );
   }
 
-  const roleWeights = collab ? (periodo.evaluatorWeights[collab.categoria] || {}) : {};
+  const roleWeights = collab ? rolesRequeridosPara(periodo, collab) : {};
 
   return (
     <section>
@@ -3149,7 +3167,7 @@ const VistaResultados = ({periodo, collaborators, evaluations}) => {
       const catLabel = CATEGORIES.find(c=>c.key===p.categoria)?.label || p.categoria;
       const estado = fs.score!==null ? classifySemaforo(fs.score, scoreConfig) : null;
       const breakdown = componentBreakdownFor(p, periodo.evaluatorWeights, periodo.componentWeights, evaluations, periodo.componentWeightsByCategoria);
-      const roleWeights = (periodo.evaluatorWeights[p.categoria] || {});
+      const roleWeights = (rolesRequeridosPara(periodo, p));
 
       children.push(new Paragraph({text:p.nombre, heading:HeadingLevel.HEADING_1, pageBreakBefore:true}));
       children.push(new Paragraph({text:`${p.cargo || 'Sin cargo'} ${p.area ? '· '+p.area : ''} · ${catLabel}`}));
@@ -3195,7 +3213,7 @@ const VistaResultados = ({periodo, collaborators, evaluations}) => {
       const catLabel = CATEGORIES.find(c=>c.key===p.categoria)?.label || p.categoria;
       const estado = fs.score!==null ? classifySemaforo(fs.score, scoreConfig) : null;
       const breakdown = componentBreakdownFor(p, periodo.evaluatorWeights, periodo.componentWeights, evaluations, periodo.componentWeightsByCategoria);
-      const roleWeights = (periodo.evaluatorWeights[p.categoria] || {});
+      const roleWeights = (rolesRequeridosPara(periodo, p));
 
       const children = [
         new Paragraph({text:`${ENTIDAD_NOMBRE} — Informe individual`, heading:HeadingLevel.HEADING_1}),
@@ -3295,7 +3313,7 @@ const VistaResultados = ({periodo, collaborators, evaluations}) => {
         {collaborators.length===0 ? <div className="empty">Aún no hay colaboradores. Agrégalos en la sección Colaboradores.</div> : rows.map(({p,fs})=>{
           const catLabel = CATEGORIES.find(c=>c.key===p.categoria)?.label || p.categoria;
           const estado = fs.score!==null ? classifySemaforo(fs.score, scoreConfig) : null;
-          const roleWeights = (periodo.evaluatorWeights[p.categoria] || {});
+          const roleWeights = (rolesRequeridosPara(periodo, p));
           const open = selectedId===p.id;
           return (
             <div key={p.id}>
@@ -3360,7 +3378,7 @@ const VistaResultados = ({periodo, collaborators, evaluations}) => {
           const catLabel = CATEGORIES.find(c=>c.key===p.categoria)?.label || p.categoria;
           const estado = fs.score!==null ? classifySemaforo(fs.score, scoreConfig) : null;
           const breakdown = componentBreakdownFor(p, periodo.evaluatorWeights, periodo.componentWeights, evaluations, periodo.componentWeightsByCategoria);
-          const roleWeights = (periodo.evaluatorWeights[p.categoria] || {});
+          const roleWeights = (rolesRequeridosPara(periodo, p));
           return (
             <div className="print-page" key={p.id}>
               <div className="print-header">
@@ -3431,7 +3449,7 @@ const ResultDetail = ({p, fs, periodo, evaluations}) => {
       <div className="field-row">
         <div>
           <h4 style={{margin:'0 0 10px', fontFamily:'var(--font-display)'}}>Por evaluador</h4>
-          {Object.entries((periodo.evaluatorWeights[p.categoria] || {})).map(([roleKey,w])=>{
+          {Object.entries((rolesRequeridosPara(periodo, p))).map(([roleKey,w])=>{
             const val = fs.roleScores[roleKey];
             return (
               <div className="breakdown-row" key={roleKey}>
