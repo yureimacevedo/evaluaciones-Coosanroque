@@ -2676,7 +2676,13 @@ const VistaAsignaciones = ({periodo, collaborators, assignments, evaluations, on
     const rolesFaltantes = Object.keys(roleWeights).filter(roleKey=>{
       if(roleKey==='autoevaluacion') return false; // se asigna sola, no requiere a nadie
       if(!roleWeights[roleKey]) return false; // peso 0, ese rol no aplica de verdad
-      return !assignments.some(a=>a.evaluadoId===p.id && a.role===roleKey);
+      // Cumple si hay una asignación formal (flujo Asignaciones → portal) O si
+      // ya existe la evaluación en sí (ej. cargada por Captura manual, que
+      // guarda la calificación directamente sin pasar por una asignación) —
+      // en ambos casos, ese rol ya está cubierto de verdad para esta persona.
+      const tieneAsignacion = assignments.some(a=>a.evaluadoId===p.id && a.role===roleKey);
+      const tieneEvaluacion = evaluations.some(e=>e.collaboratorId===p.id && e.role===roleKey);
+      return !tieneAsignacion && !tieneEvaluacion;
     });
     return {p, rolesFaltantes};
   }).filter(x=>x.rolesFaltantes.length>0);
