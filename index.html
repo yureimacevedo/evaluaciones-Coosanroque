@@ -2737,11 +2737,26 @@ const VistaAsignaciones = ({periodo, collaborators, assignments, evaluations, on
               <div key={cargoKey} style={{marginBottom:12}}>
                 <div style={{fontFamily:'var(--font-display)', fontWeight:600, fontSize:13.5, marginBottom:4}}>{cargoKey}</div>
                 <ul style={{margin:0, paddingLeft:20, fontSize:13}}>
-                  {incompletosPorCargo[cargoKey].map(({p,rolesFaltantes})=>(
-                    <li key={p.id} style={{marginBottom:4}}>
-                      <strong>{p.nombre}</strong> — le falta: {rolesFaltantes.map(r=>ROLES.find(x=>x.key===r)?.label || r).join(', ')}
-                    </li>
-                  ))}
+                  {incompletosPorCargo[cargoKey].map(({p,rolesFaltantes})=>{
+                    const asignacionesDe = assignments.filter(a=>a.evaluadoId===p.id);
+                    const evaluacionesDe = evaluations.filter(e=>e.collaboratorId===p.id);
+                    return (
+                      <li key={p.id} style={{marginBottom:10}}>
+                        <strong>{p.nombre}</strong> — le falta: {rolesFaltantes.map(r=>ROLES.find(x=>x.key===r)?.label || r).join(', ')}
+                        <div style={{marginTop:4, marginBottom:2, padding:'8px 10px', background:'var(--surface-alt)', borderRadius:'var(--radius)', fontFamily:'var(--font-mono)', fontSize:11}}>
+                          <div><strong>Asignaciones guardadas para esta persona ({asignacionesDe.length}):</strong></div>
+                          {asignacionesDe.length===0 ? <div>— ninguna —</div> : asignacionesDe.map(a=>(
+                            <div key={a.id}>rol: "{a.role}" · evaluador: {a.evaluadorLabel}</div>
+                          ))}
+                          <div style={{marginTop:6}}><strong>Evaluaciones guardadas para esta persona ({evaluacionesDe.length}):</strong></div>
+                          {evaluacionesDe.length===0 ? <div>— ninguna —</div> : evaluacionesDe.map(e=>(
+                            <div key={e.id}>rol: "{e.role}" · evaluador: {e.evaluatorLabel || '(sin nombre)'}</div>
+                          ))}
+                          <div style={{marginTop:6}}><strong>Roles que espera "{CATEGORIES.find(c=>c.key===p.categoria)?.label || p.categoria}":</strong> {Object.keys(periodo.evaluatorWeights[p.categoria]||{}).map(r=>`"${r}"`).join(', ')}</div>
+                        </div>
+                      </li>
+                    );
+                  })}
                 </ul>
               </div>
             ))}
