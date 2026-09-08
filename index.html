@@ -212,7 +212,7 @@
   .assign-collab{border:1px solid var(--border); border-radius:var(--radius); margin-bottom:14px; overflow:hidden;}
   .assign-collab-head{display:flex; justify-content:space-between; align-items:center; padding:14px 18px; background:var(--surface-alt);}
   .assign-role-row{display:flex; align-items:center; gap:10px; padding:10px 18px; border-top:1px solid var(--border); flex-wrap:wrap;}
-  .assign-role-row .role-name{width:200px; font-weight:600; font-size:12.5px; flex-shrink:0;}
+  .assign-role-row .role-name{width:230px; font-weight:600; font-size:12.5px; flex-shrink:0;}
   .assign-chip{display:flex; align-items:center; gap:6px; background:var(--accent-pale); color:var(--accent-deep); padding:5px 10px; border-radius:14px; font-size:12px;}
   .assign-chip button{all:unset; cursor:pointer; color:var(--accent-deep); font-weight:700; line-height:1;}
   .assign-add-form{display:flex; gap:8px; align-items:center; flex-wrap:wrap;}
@@ -2479,6 +2479,37 @@ const VistaColaboradores = ({periodo, collaborators, evaluations, areas, restric
   });
   const filtrosActivos = !!(filterText.trim() || filterArea || filterCat);
 
+  const exportarWordColaboradores = async () => {
+    const {Document, Packer, Paragraph, Table, TableRow, TableCell, HeadingLevel, WidthType} = docx;
+    const fechaGenerado = new Date().toLocaleDateString('es-CO', {year:'numeric', month:'long', day:'numeric'});
+    const children = [
+      new Paragraph({text:`${ENTIDAD_NOMBRE} — ${lockCategoria ? lockLabel : 'Colaboradores'}`, heading:HeadingLevel.HEADING_1}),
+      new Paragraph({text:`Periodo: ${periodo.periodoLabel || periodo.nombre} · Generado el ${fechaGenerado}${filtrosActivos ? ' · Lista filtrada' : ''}`}),
+      new Paragraph({text:''}),
+    ];
+    if(filtered.length===0){
+      children.push(new Paragraph({text:'Ningún colaborador coincide con el filtro aplicado.'}));
+    } else {
+      const headerRow = new TableRow({children:['Nombre','Cargo','Área','Categoría','Código de acceso'].map(h=>new TableCell({children:[new Paragraph({text:h, bold:true})]}))});
+      const dataRows = filtered.map(p=>{
+        const catLabel = CATEGORIES.find(c=>c.key===p.categoria)?.label || p.categoria;
+        return new TableRow({children:[
+          new TableCell({children:[new Paragraph(p.nombre)]}),
+          new TableCell({children:[new Paragraph(p.cargo || '—')]}),
+          new TableCell({children:[new Paragraph(p.area || '—')]}),
+          new TableCell({children:[new Paragraph(catLabel)]}),
+          new TableCell({children:[new Paragraph(p.accessCode)]}),
+        ]});
+      });
+      children.push(new Table({width:{size:100,type:WidthType.PERCENTAGE}, rows:[headerRow, ...dataRows]}));
+    }
+    const doc = new Document({sections:[{children}]});
+    const blob = await Packer.toBlob(doc);
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a'); a.href=url; a.download=`colaboradores_${periodo.nombre}.docx`; a.click();
+    URL.revokeObjectURL(url);
+  };
+
   return (
     <section>
       <div className="view-head no-print">
@@ -2491,6 +2522,7 @@ const VistaColaboradores = ({periodo, collaborators, evaluations, areas, restric
         </div>
         <div className="view-head-actions">
           <button className="btn secondary small" onClick={()=>window.print()}>Imprimir</button>
+          <button className="btn secondary small" onClick={exportarWordColaboradores}>Exportar Word</button>
         </div>
       </div>
 
@@ -2652,6 +2684,7 @@ const VistaColaboradores = ({periodo, collaborators, evaluations, areas, restric
    ========================================================= */
 const VistaAsignaciones = ({periodo, collaborators, assignments, evaluations, onSaveAssignment, onDeleteAssignment}) => {
   const [selectFor, setSelectFor] = useState({}); // key `${evaluadoId}|${roleKey}` -> selected value
+  const [filterFor, setFilterFor] = useState({}); // key `${evaluadoId}|${roleKey}` -> texto de búsqueda
 
   const asignar = async (evaluadoId, roleKey) => {
     const key = `${evaluadoId}|${roleKey}`;
@@ -2669,6 +2702,59 @@ const VistaAsignaciones = ({periodo, collaborators, assignments, evaluations, on
     const id = 'a_' + Date.now() + Math.random().toString(36).slice(2,6);
     await onSaveAssignment({id, evaluadoId, role:roleKey, evaluadorId, evaluadorLabel, ts:Date.now()});
     setSelectFor(prev=>({...prev, [key]:''}));
+    setFilterFor(prev=>({...prev, [key]:''}));
+  };
+
+  const exportarWordAsignaciones = async () => {
+    const {Document, Packer, Paragraph, Table, TableRow, TableCell, HeadingLevel, WidthType} = docx;
+    const fechaGenerado = new Date().toLocaleDateString('es-CO', {year:'numeric', month:'long', day:'numeric'});
+    const children = [
+      new Paragraph({text:`${ENTIDAD_NOMBRE} — Cruce de evaluadores`, heading:HeadingLevel.HEADING_1}),
+      new Paragraph({text:`Periodo: ${periodo.periodoLabel || periodo.nombre} · Generado el ${fechaGenerado}`}),
+    ];
+    collaborators.forEach(evaluado=>{
+      const roleWeights = (periodo.evaluatorWeights[evaluado.categoria] || {});
+      const catLabel = CATEGORIES.find(c=>c.key===evaluado.categoria)?.label || evaluado.categoria;
+      children.push(new Paragraph({text:'', spacing:{before:200}}));
+      children.push(new Paragraph({text:`${evaluado.nombre} — ${catLabel}${evaluado.cargo?' · '+evaluado.cargo:''}`, heading:HeadingLevel.HEADING_2}));
+      const headerRow = new TableRow({children:['Rol','Evaluador(es) asignado(s)','Estado'].map(h=>new TableCell({children:[new Paragraph({text:h, bold:true})]}))});
+      const dataRows = [];
+      Object.keys(roleWeights).filter(roleKey => !(roleKey==='autoevaluacion' && evaluado.soloEvaluador)).forEach(roleKey=>{
+        const roleLabel = ROLES.find(r=>r.key===roleKey)?.label || roleKey;
+        if(roleKey==='autoevaluacion'){
+          const done = evaluations.some(e=>e.collaboratorId===evaluado.id && e.role==='autoevaluacion');
+          dataRows.push(new TableRow({children:[
+            new TableCell({children:[new Paragraph(roleLabel)]}),
+            new TableCell({children:[new Paragraph('Automática — el propio colaborador')]}),
+            new TableCell({children:[new Paragraph(done?'Completada':'Pendiente')]}),
+          ]}));
+          return;
+        }
+        const assigned = assignments.filter(a=>a.evaluadoId===evaluado.id && a.role===roleKey);
+        if(assigned.length===0){
+          dataRows.push(new TableRow({children:[
+            new TableCell({children:[new Paragraph(roleLabel)]}),
+            new TableCell({children:[new Paragraph('Sin evaluador asignado')]}),
+            new TableCell({children:[new Paragraph('—')]}),
+          ]}));
+          return;
+        }
+        assigned.forEach(a=>{
+          const done = evaluations.some(e=>e.assignmentId===a.id);
+          dataRows.push(new TableRow({children:[
+            new TableCell({children:[new Paragraph(roleLabel)]}),
+            new TableCell({children:[new Paragraph(a.evaluadorLabel)]}),
+            new TableCell({children:[new Paragraph(done?'Completada':'Pendiente')]}),
+          ]}));
+        });
+      });
+      children.push(new Table({width:{size:100,type:WidthType.PERCENTAGE}, rows:[headerRow, ...dataRows]}));
+    });
+    const doc = new Document({sections:[{children}]});
+    const blob = await Packer.toBlob(doc);
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a'); a.href=url; a.download=`cruce_evaluadores_${periodo.nombre}.docx`; a.click();
+    URL.revokeObjectURL(url);
   };
 
   const incompletos = collaborators.map(p=>{
@@ -2720,6 +2806,7 @@ const VistaAsignaciones = ({periodo, collaborators, assignments, evaluations, on
         </div>
         <div className="view-head-actions">
           <button className="btn secondary small" onClick={()=>window.print()}>Imprimir</button>
+          <button className="btn secondary small" onClick={exportarWordAsignaciones}>Exportar Word</button>
         </div>
       </div>
 
@@ -2776,6 +2863,12 @@ const VistaAsignaciones = ({periodo, collaborators, assignments, evaluations, on
             </div>
             {Object.keys(roleWeights).filter(roleKey => !(roleKey==='autoevaluacion' && evaluado.soloEvaluador)).map(roleKey=>{
               const roleLabel = ROLES.find(r=>r.key===roleKey)?.label || roleKey;
+              const roleHint = {
+                jefeInmediato: `Selecciona aquí a quien evaluará a ${evaluado.nombre} como su jefe`,
+                par: `Selecciona aquí a quien evaluará a ${evaluado.nombre} como su par`,
+                personasACargo: `Selecciona aquí a quien evaluará a ${evaluado.nombre} desde abajo (un subordinado suyo) — no a quién evalúa ${evaluado.nombre}`,
+                companeroOperativo: `Selecciona aquí a quien evaluará a ${evaluado.nombre} como su compañero/a`,
+              }[roleKey];
               if(roleKey==='autoevaluacion'){
                 const done = evaluations.some(e=>e.collaboratorId===evaluado.id && e.role==='autoevaluacion');
                 return (
@@ -2792,7 +2885,7 @@ const VistaAsignaciones = ({periodo, collaborators, assignments, evaluations, on
               const key = `${evaluado.id}|${roleKey}`;
               return (
                 <div className="assign-role-row" key={roleKey}>
-                  <div className="role-name">{roleLabel}</div>
+                  <div className="role-name">{roleLabel}{roleHint && <div className="hint" style={{fontWeight:400, marginTop:3}}>{roleHint}</div>}</div>
                   <div style={{flex:1, display:'flex', flexDirection:'column', gap:8}}>
                     <div style={{display:'flex', gap:6, flexWrap:'wrap'}}>
                       {assigned.length===0 && <span className="hint" style={{margin:0}}>Sin evaluador asignado</span>}
@@ -2807,9 +2900,10 @@ const VistaAsignaciones = ({periodo, collaborators, assignments, evaluations, on
                       })}
                     </div>
                     <div className="assign-add-form">
+                      <input type="text" placeholder="Buscar…" style={{width:130}} value={filterFor[key]||''} onChange={e=>setFilterFor(prev=>({...prev, [key]:e.target.value}))}/>
                       <select value={selectFor[key]||''} onChange={e=>setSelectFor(prev=>({...prev, [key]:e.target.value}))}>
                         <option value="">+ Asignar colaborador…</option>
-                        {otherCollabs.map(c=><option key={c.id} value={c.id}>{c.nombre}</option>)}
+                        {otherCollabs.filter(c=>c.nombre.toLowerCase().includes((filterFor[key]||'').trim().toLowerCase())).map(c=><option key={c.id} value={c.id}>{c.nombre}</option>)}
                         <option value="__external">Persona externa (sin acceso al portal)</option>
                       </select>
                       <button className="btn small secondary" onClick={()=>asignar(evaluado.id, roleKey)}>Asignar</button>
