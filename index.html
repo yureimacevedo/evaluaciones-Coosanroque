@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Evaluación 270° · Coosanroque</title>
+<title>Talentómetro · Coosanroque</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%232A4256'/%3E%3Ccircle cx='32' cy='32' r='19' fill='none' stroke='%23A9C1CE' stroke-width='6'/%3E%3Ccircle cx='32' cy='32' r='19' fill='none' stroke='%23EAF0F2' stroke-width='6' stroke-dasharray='75 119' stroke-linecap='round' transform='rotate(-90 32 32)'/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
@@ -790,12 +790,14 @@ const AuthShell = ({children, marca}) => (
         {marca?.logoDataUrl && (
           <div className="logo-card big" style={{marginBottom:18}}><Logo size={88} src={marca.logoDataUrl}/></div>
         )}
-        <div className="mark-badge"><span className="dot"></span>Talento · 270°</div>
-        <h1 className="auth-headline">Evaluación de<br/>desempeño 270°</h1>
-        <div className="entidad-name on-dark" style={{fontSize:16, marginBottom:18}}>{ENTIDAD_NOMBRE}</div>
+        <h1 className="auth-headline">Talentómetro</h1>
+        <div className="entidad-name on-dark" style={{fontSize:16, marginBottom:14}}>{ENTIDAD_NOMBRE}</div>
+        <p style={{fontFamily:'var(--font-display)', fontSize:18, fontWeight:600, color:'#FFFFFF', margin:'0 0 12px', maxWidth:420}}>
+          Midiendo el talento, potenciando la experiencia.
+        </p>
         <p className="auth-tagline">
-          El desempeño se ve completo cuando se mira desde todos los ángulos que importan:
-          el tuyo, el de tu equipo, el de quienes te acompañan cada día.
+          Evalúa el desempeño, escucha la voz de las personas y transforma los datos en
+          acciones que impulsen el desarrollo, el compromiso y el bienestar organizacional.
         </p>
       </div>
       <svg className="auth-rings" viewBox="0 0 400 400" aria-hidden="true">
@@ -1043,7 +1045,7 @@ const PortalApp = ({marca}) => {
         <div className="portal-top">
           <div className="brand"><div className="brand-logo-block">
             {marca?.logoDataUrl && <div className="logo-card"><Logo size={44} src={marca.logoDataUrl}/></div>}
-            <span className="mark">Talento · 270°</span>
+            <span className="mark">Evaluación 270°</span>
           </div><h1>Portal de colaboradores</h1><div className="entidad-name">{ENTIDAD_NOMBRE}</div></div>
           <button className="back-link" style={{margin:0}} onClick={exit}>← Salir</button>
         </div>
@@ -1060,7 +1062,7 @@ const PortalApp = ({marca}) => {
       <div className="portal-top">
         <div className="brand"><div className="brand-logo-block">
             {marca?.logoDataUrl && <div className="logo-card"><Logo size={44} src={marca.logoDataUrl}/></div>}
-            <span className="mark">Talento · 270°</span>
+            <span className="mark">Evaluación 270°</span>
           </div><h1>{portalUser && portalUser.categoria==='organosControl' ? 'Portal de Órganos de Administración y Control' : 'Portal de colaboradores'}</h1><div className="entidad-name">{ENTIDAD_NOMBRE}</div></div>
         <button className="back-link" style={{margin:0}} onClick={exit}>← Salir</button>
       </div>
@@ -1401,9 +1403,9 @@ const AdminApp = ({user, marca}) => {
         <div className="brand">
           <div className="brand-logo-block">
             {marca?.logoDataUrl && <div className="logo-card"><Logo size={44} src={marca.logoDataUrl}/></div>}
-            <span className="mark">Talento · 270°</span>
+            <span className="mark">Evaluación 270°</span>
           </div>
-          <h1>Evaluación de desempeño</h1>
+          <h1>Talentómetro</h1>
           <div className="entidad-name on-dark">{ENTIDAD_NOMBRE}</div>
           <div className="sub">{isSupervisor ? `Supervisor · ${misAreas.join(', ')}` : 'Panel de administración'}</div>
         </div>
